@@ -2,15 +2,15 @@
 from pathlib import PurePosixPath
 from typing import Any, Dict
 
-from kedro.io import AbstractDataSet
-from kedro.io.core import get_filepath_str, get_protocol_and_path
+from kedro.io import AbstractVersionedDataSet, Version
+from kedro.io.core import get_protocol_and_path
 
 import fsspec
 import numpy as np
 from PIL import Image
 
 
-class ImageDataSet(AbstractDataSet):
+class ImageDataSet(AbstractVersionedDataSet):
     """``ImageDataSet`` loads / save image data from a given filepath as `numpy` array using Pillow.
 
     Example:
@@ -19,17 +19,23 @@ class ImageDataSet(AbstractDataSet):
         >>> ImageDataSet(filepath='/img/file/path.png')
     """
 
-    def __init__(self, filepath: str):
+    def __init__(self, filepath: str, version: Version = None):
         """Creates a new instance of ImageDataSet to load / save image data for given filepath.
 
         Args:
             filepath: The location of the image file to load / save data.
+            version: The version of the dataset being saved and loaded.
         """
-        # parse the path and protocol (e.g. file, http, s3, etc.)
         protocol, path = get_protocol_and_path(filepath)
         self._protocol = protocol
-        self._filepath = PurePosixPath(path)
         self._fs = fsspec.filesystem(self._protocol)
+
+        super().__init__(
+            filepath=PurePosixPath(path),
+            version=version,
+            exists_function=self._fs.exists,
+            glob_function=self._fs.glob,
+        )
 
     def _load(self) -> np.ndarray:
         """Loads data from the image file.
@@ -37,8 +43,7 @@ class ImageDataSet(AbstractDataSet):
         Returns:
             Data from the image file as a numpy array
         """
-        # using get_filepath_str ensures that the protocol and path are appended correctly for different filesystems
-        load_path = get_filepath_str(self._get_load_path(), self._protocol)
+        load_path = self._get_load_path()
         with self._fs.open(load_path, mode="r") as f:
             image = Image.open(f).convert('RGBA')
             return np.asarray(image)
@@ -46,8 +51,7 @@ class ImageDataSet(AbstractDataSet):
     def _save(self, data: np.ndarray) -> None:
         """Saves image data to the specified filepath.
         """
-        # using get_filepath_str ensures that the protocol and path are appended correctly for different filesystems
-        save_path = get_filepath_str(self._get_save_path(), self._protocol)
+        save_path = self._get_save_path()
         with self._fs.open(save_path, mode="wb") as f:
             image = Image.fromarray(data)
             image.save(f)
@@ -57,5 +61,6 @@ class ImageDataSet(AbstractDataSet):
         """
         return dict(
             filepath=self._filepath,
+            version=self._version,
             protocol=self._protocol
         )
